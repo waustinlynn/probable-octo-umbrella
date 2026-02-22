@@ -1,0 +1,254 @@
+name: Deploy Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy-plan
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+env:
+  TERRAFORM_VERSION: 1.6.0
+  AZURE_REGION: eastus
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'plan' || github.event.inputs.action == ''
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Azure Login using OIDC
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform Format Check
+        id: fmt
+        run: |
+          cd infrastructure/terraform
+          terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        run: |
+          cd infrastructure/terraform
+          terraform init \
+            -backend-config="resource_group_name=${{ secrets.AZURE_STATE_RG }}" \
+            -backend-config="storage_account_name=${{ secrets.AZURE_STATE_STORAGE }}" \
+            -backend-config="container_name=${{ secrets.AZURE_STATE_CONTAINER }}" \
+            -backend-config="key=language-${{ github.event.inputs.environment }}.tfstate"
+
+      - name: Terraform Validate
+        id: validate
+        run: |
+          cd infrastructure/terraform
+          terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          cd infrastructure/terraform
+          terraform plan \
+            -var-file="environments/${{ github.event.inputs.environment }}.tfvars" \
+            -out=tfplan
+
+      - name: Display Plan Output
+        run: |
+          cd infrastructure/terraform
+          echo "## Terraform Plan Summary - ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment**: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          terraform show -no-color tfplan | head -200 >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "*(truncated - see full log for complete plan)*" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-plan
+          path: infrastructure/terraform/tfplan
+          retention-days: 7
+
+  apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'apply'
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Azure Login using OIDC
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform Init
+        id: init
+        run: |
+          cd infrastructure/terraform
+          terraform init \
+            -backend-config="resource_group_name=${{ secrets.AZURE_STATE_RG }}" \
+            -backend-config="storage_account_name=${{ secrets.AZURE_STATE_STORAGE }}" \
+            -backend-config="container_name=${{ secrets.AZURE_STATE_CONTAINER }}" \
+            -backend-config="key=language-${{ github.event.inputs.environment }}.tfstate"
+
+      - name: Terraform Plan (Safety Check)
+        id: safety_plan
+        run: |
+          cd infrastructure/terraform
+          terraform plan \
+            -var-file="environments/${{ github.event.inputs.environment }}.tfvars" \
+            -out=tfplan
+
+      - name: Display Planned Changes
+        run: |
+          cd infrastructure/terraform
+          echo "## ⚠️ About to Apply These Changes to ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment**: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          terraform show -no-color tfplan | head -300 >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Please verify above changes are correct!**" >> $GITHUB_STEP_SUMMARY
+
+      - name: Terraform Apply
+        id: apply
+        run: |
+          cd infrastructure/terraform
+          terraform apply \
+            -var-file="environments/${{ github.event.inputs.environment }}.tfvars" \
+            -auto-approve
+
+      - name: Export Outputs
+        id: outputs
+        run: |
+          cd infrastructure/terraform
+          echo "server_fqdn=$(terraform output -raw server_container_app_fqdn)" >> $GITHUB_OUTPUT
+          echo "registry_server=$(terraform output -raw container_registry_login_server)" >> $GITHUB_OUTPUT
+
+      - name: Deployment Summary
+        run: |
+          echo "## ✅ Infrastructure Deployment Complete - ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment**: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Server FQDN**: \`${{ steps.outputs.outputs.server_fqdn }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Container Registry**: \`${{ steps.outputs.outputs.registry_server }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "View logs in GitHub Actions tab" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-apply-artifacts
+          path: infrastructure/terraform/.terraform/
+          retention-days: 5
+
+  destroy-plan:
+    name: Terraform Destroy Plan
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'destroy-plan'
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Azure Login using OIDC
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform Init
+        run: |
+          cd infrastructure/terraform
+          terraform init \
+            -backend-config="resource_group_name=${{ secrets.AZURE_STATE_RG }}" \
+            -backend-config="storage_account_name=${{ secrets.AZURE_STATE_STORAGE }}" \
+            -backend-config="container_name=${{ secrets.AZURE_STATE_CONTAINER }}" \
+            -backend-config="key=language-${{ github.event.inputs.environment }}.tfstate"
+
+      - name: Terraform Destroy Plan
+        id: destroy_plan
+        run: |
+          cd infrastructure/terraform
+          terraform plan \
+            -destroy \
+            -var-file="environments/${{ github.event.inputs.environment }}.tfvars" \
+            -out=tfplan-destroy
+
+      - name: Display Destroy Plan
+        run: |
+          cd infrastructure/terraform
+          echo "## ⚠️ DESTROY PLAN - ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment**: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Resources to be Deleted:**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          terraform show -no-color tfplan-destroy >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**THIS IS A PREVIEW ONLY - Nothing was deleted**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To proceed with destruction, manually run: \`terraform destroy -var-file=environments/${{ github.event.inputs.environment }}.tfvars\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Destroy Plan
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-destroy-plan
+          path: infrastructure/terraform/tfplan-destroy
+          retention-days: 7

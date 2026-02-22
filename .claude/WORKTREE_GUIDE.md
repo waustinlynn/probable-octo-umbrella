@@ -98,16 +98,17 @@ This guide specifies how Claude should behave when working in different git work
 
 ### 3. Infrastructure Worktree
 **Directory**: `infrastructure/`
-**Tech Stack**: Terraform, Kubernetes manifests, Docker, Bash/Shell scripts
+**Tech Stack**: Terraform, Azure Container Apps, Docker, Bash/Shell scripts
 **Primary Language**: HCL (Terraform), YAML, Bash
+**Cloud Provider**: Azure (primary), AWS/GCP (legacy)
 
 #### Responsibilities
-- Infrastructure as Code (Terraform)
-- Kubernetes manifests and configurations
-- Docker build processes
-- Cloud resource management (AWS/GCP/Azure)
-- Environment configuration
-- Networking and security policies
+- Infrastructure as Code (Terraform targeting Azure)
+- Docker build processes and container registry management
+- Azure cloud resource management (Container Apps, VNets, ACR, etc.)
+- Environment configuration and state management
+- Networking, security policies, and RBAC
+- gRPC server deployment on Container Apps
 
 #### Agent Specifications
 - **General Purpose Agent**: For understanding IaC patterns and structure
@@ -119,27 +120,65 @@ This guide specifies how Claude should behave when working in different git work
 - **Bash**:
   - `terraform plan` - Plan infrastructure changes (read-only analysis)
   - `terraform validate` - Validate configuration syntax
-  - `kubectl get *` - Query Kubernetes resources (read-only)
+  - `terraform state list/show` - View current state
+  - `terraform init` - Initialize Terraform with Azure backend
+  - `az *` - Azure CLI commands for manual operations
   - `docker build *` - Build container images
-  - `helm validate *` - Validate Helm charts
+  - `docker push *` - Push images to Azure Container Registry
   - `git worktree *` - Manage git worktrees
 - **File Operations**: Full read/write within `infrastructure/` directory
 - **No Access**: Client code, server application code
+- **Not Permitted**:
+  - `terraform apply` in main branch (must use GitHub Actions)
+  - `terraform destroy` without manual review
+  - `az deployment *` without planning first
 
 #### Key Files & Patterns
-- Terraform modules: `infrastructure/terraform/modules/`
-- Provider configuration: `infrastructure/terraform/providers.tf`
-- Kubernetes: `infrastructure/kubernetes/`
-- Dockerfiles: `infrastructure/docker/`
+- Terraform Azure config: `infrastructure/terraform/` (providers.tf, main.tf, variables.tf, outputs.tf)
+- Terraform state backend: Azure Storage Account (configured via secrets)
+- Container registry: Azure Container Registry (ACR)
+- Dockerfiles: `infrastructure/docker/` (server, client)
+- Deployment guide: `infrastructure/AZURE_DEPLOYMENT_GUIDE.md`
 - Scripts: `infrastructure/scripts/`
+- GitHub Actions workflows: `.github/workflows/deploy.yml`
 
 #### Development Workflow
 1. Work in `infrastructure` worktree
-2. Modify Terraform configs, update Kubernetes manifests, or adjust Docker builds
-3. Run `terraform plan` to preview changes
+2. Modify Terraform Azure configs (Container Apps, VNets, ACR, etc.)
+3. Update `infrastructure/terraform/terraform.tfvars` with your environment values
 4. Run `terraform validate` to check syntax
-5. For breaking changes, create a migration plan document
-6. Commit with `git commit -m "infra(terraform): ..."` or `git commit -m "infra(k8s): ..."`
+5. Run `terraform plan` to preview Azure resource changes
+6. For local testing, use `terraform apply` (with appropriate environment variables)
+7. Review plan output before applying changes
+8. For breaking changes, create a migration plan document
+9. Commit with `git commit -m "infra(terraform): ..."`
+
+#### Azure Environment Setup
+- **Cloud Provider**: Microsoft Azure
+- **State Management**: Azure Storage Account with Terraform backend
+- **Container Registry**: Azure Container Registry (ACR)
+- **Compute**: Azure Container Apps (for gRPC server)
+- **Networking**: Azure Virtual Networks (VNet) with subnets
+- **Monitoring**: Log Analytics Workspace
+- **Authentication**: Azure CLI or GitHub Actions OIDC
+
+#### Pre-requisites for Local Development
+```bash
+# Install Azure CLI and login
+az login
+az account set --subscription <subscription-id>
+
+# Verify Terraform access
+cd infrastructure/terraform
+terraform init
+```
+
+#### Terraform Backend State Management
+- **Location**: Azure Storage Account (language-terraform-state resource group)
+- **Locking**: Automatic via Azure Storage leases
+- **Versioning**: Enabled for state rollback
+- **Remote State**: Required for production deployments
+- See `AZURE_DEPLOYMENT_GUIDE.md` for setup instructions
 
 ---
 
@@ -229,12 +268,19 @@ npm run test:watch
 npm run test:integration
 ```
 
-**Infrastructure Validation**
+**Infrastructure Validation (Azure)**
 ```bash
-cd infrastructure
-terraform validate
-terraform plan
-kubectl apply --dry-run=client -f kubernetes/
+cd infrastructure/terraform
+
+# Terraform validation
+terraform fmt -check -recursive              # Format check
+terraform init                                # Initialize with Azure backend
+terraform validate                            # Validate configuration
+terraform plan -var-file="terraform.tfvars" -var="environment=dev"  # Plan changes
+
+# Azure CLI validation (optional)
+az account show                               # Verify Azure authentication
+az group list --output table                 # List resource groups
 ```
 
 ### Commit Message Conventions
@@ -284,11 +330,15 @@ When Claude is asked to work across multiple domains:
 - Document gRPC service changes in proto files
 - Ensure backward compatibility where possible
 
-### Infrastructure Context
-- Always plan before applying infrastructure changes
-- Document the reasoning for configuration choices
-- Consider disaster recovery and security implications
-- Use immutable infrastructure principles
+### Infrastructure Context (Azure Deployment)
+- **Always use `terraform plan` before apply** - Review all proposed changes
+- **State management is critical** - Use Azure Storage backend with locking
+- **GitHub Actions handles production deploys** - Never apply directly to main environment
+- **Document reasoning for all configuration changes**
+- **Consider disaster recovery and security implications**
+- **Use immutable infrastructure principles** - Update container images via new deployments
+- **Container Apps auto-scaling** - Monitor CPU and memory metrics
+- **gRPC on Container Apps** - Requires TCP ingress (configured in main.tf)
 
 ### Pipelines Context
 - Ensure CI/CD doesn't leak secrets

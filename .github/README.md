@@ -68,13 +68,34 @@ This directory contains GitHub-specific configuration including workflows, actio
 
 ### Deploy Workflow (`workflows/deploy.yml`)
 
-*To be implemented*
+**⚠️ All Manual Triggers** - No automatic runs (saves credits!)
 
-Expected functionality:
-- Terraform plan on PRs
-- Terraform apply on main after approval
-- Kubernetes deployment
-- Smoke tests and health checks
+**How to trigger:**
+1. Go to Actions tab → Deploy Infrastructure
+2. Click "Run workflow" button
+3. Select action: `plan`, `apply`, or `destroy-plan`
+4. Click "Run workflow"
+
+**Available Actions:**
+
+- **plan** - Terraform plan (safe preview)
+  - Format check with `terraform fmt`
+  - Validate syntax with `terraform validate`
+  - Generate plan output
+  - Shows what will change (read-only)
+  - Safe to run anytime - no changes applied
+
+- **apply** - Terraform apply (actually deploy)
+  - Plans changes again (safety check)
+  - Applies infrastructure changes
+  - Exports outputs (server FQDN, registry server, etc.)
+  - Deploys to Azure
+  - **Use after reviewing plan output**
+
+- **destroy-plan** - Terraform destroy plan (preview destruction)
+  - Generates destroy plan showing what will be deleted
+  - **Preview only** - nothing is destroyed
+  - Use to verify before manual destruction
 
 ## Environment Variables
 
@@ -84,15 +105,32 @@ REGISTRY: ghcr.io
 IMAGE_NAME: ${{ github.repository }}
 ```
 
-### Recommended Secrets
+### Required Secrets (Azure Deployment)
 Add these to GitHub Settings → Secrets and variables → Actions:
 
+**Azure Authentication** (use OIDC if available):
 ```
-AWS_REGION             # AWS region for deployment
-AWS_ROLE_TO_ASSUME     # IAM role for OIDC
-KUBE_CONFIG           # Kubernetes cluster config
-SLACK_WEBHOOK         # For notifications (optional)
+AZURE_SUBSCRIPTION_ID              # Azure subscription ID
+AZURE_TENANT_ID                    # Azure tenant ID
+AZURE_CLIENT_ID                    # Service Principal / App Registration ID
+AZURE_CLIENT_SECRET                # Service Principal secret (if not using OIDC)
 ```
+
+**Terraform State Management** (Azure Storage):
+```
+AZURE_STATE_RG                     # Resource group with state storage
+AZURE_STATE_STORAGE                # Storage account name for tfstate
+AZURE_STATE_CONTAINER              # Blob container name (e.g., "terraform-state")
+```
+
+### Optional Secrets
+```
+SLACK_WEBHOOK                      # Slack notifications on deployment
+GITHUB_TOKEN                       # For PR comments (usually automatic)
+```
+
+**Setup Instructions:**
+See `infrastructure/AZURE_DEPLOYMENT_GUIDE.md` for detailed setup instructions.
 
 ## Running Workflows
 

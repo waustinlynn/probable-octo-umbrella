@@ -1,81 +1,175 @@
 # Infrastructure
 
-This directory contains all infrastructure-as-code, container configurations, and deployment manifests.
+This directory contains all infrastructure-as-code, container configurations, and deployment automation for Azure.
+
+**Cloud Provider**: Microsoft Azure
+**Deployment Method**: Terraform + GitHub Actions
+**Container Platform**: Azure Container Apps (gRPC Server)
 
 ## Structure
 
 ```
 infrastructure/
-├── terraform/          # Terraform modules and configurations
-│   ├── providers.tf    # Cloud provider configuration
-│   ├── variables.tf    # Input variables
-│   ├── main.tf         # Main resource definitions
-│   ├── outputs.tf      # Output values
-│   └── modules/        # Reusable Terraform modules
-├── kubernetes/         # Kubernetes manifests
-│   ├── namespace.yaml  # Namespace definitions
-│   ├── deployments/    # Deployment configurations
-│   ├── services/       # Service definitions
-│   ├── configmaps/     # ConfigMap resources
-│   └── secrets/        # Secret references (don't commit sensitive data)
-└── docker/             # Dockerfile configurations
-    ├── Dockerfile.server
-    ├── Dockerfile.client
-    └── .dockerignore
+├── terraform/                      # Terraform configurations for Azure
+│   ├── providers.tf               # Azure provider configuration
+│   ├── main.tf                    # Azure resources (Container Apps, VNet, ACR, etc.)
+│   ├── variables.tf               # Input variables for Azure deployment
+│   ├── outputs.tf                 # Output values (FQDN, registry URL, etc.)
+│   ├── terraform.tfvars.example   # Template for local configuration
+│   └── .terraform/                # (Local) Terraform working directory
+├── docker/                        # Dockerfile configurations
+│   ├── Dockerfile.server          # gRPC server container image
+│   ├── Dockerfile.client          # Client container image
+│   └── .dockerignore
+├── AZURE_DEPLOYMENT_GUIDE.md      # Step-by-step Azure deployment instructions
+├── STATE_MANAGEMENT.md            # Terraform state and locking documentation
+└── README.md                      # This file
 ```
 
 ## Development Workflow
 
+### Local Development (Planning)
+
 When working in the infrastructure worktree:
 
-### Validate Changes
 ```bash
+cd infrastructure/terraform
+
+# 1. Copy and configure variables
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your Azure subscription ID, region, etc.
+
+# 2. Initialize Terraform
+terraform init  # (uses local backend for planning)
+
+# 3. Check formatting
+terraform fmt -check -recursive
+
+# 4. Validate configuration
+terraform validate
+
+# 5. Plan infrastructure changes (read-only)
+terraform plan \
+  -var-file="terraform.tfvars" \
+  -var="environment=dev" \
+  -out=tfplan
+
+# 6. Review the plan
+terraform show tfplan
+```
+
+### Deploying Infrastructure
+
+**Never apply locally to production.**
+Use GitHub Actions for all main branch deployments:
+
+1. **Create a feature branch:**
+   ```bash
+   git checkout -b infra/feature-name
+   ```
+
+2. **Make Terraform changes:**
+   ```bash
+   cd infrastructure/terraform
+   # Edit main.tf, variables.tf, etc.
+   terraform plan -var-file="terraform.tfvars" -var="environment=dev"
+   ```
+
+3. **Push and create PR:**
+   ```bash
+   git add infrastructure/
+   git commit -m "infra(terraform): description of changes"
+   git push origin infra/feature-name
+   ```
+
+4. **Review plan on PR:**
+   - GitHub Actions runs `terraform plan`
+   - Plan output commented on PR
+   - Reviewers inspect proposed changes
+
+5. **Merge to main:**
+   - After approval, PR is merged
+   - GitHub Actions runs plan again
+   - **Manual approval required** in GitHub environment
+   - `terraform apply` executes automatically
+
+### Docker Image Building
+
+Images are automatically built by GitHub Actions (see `.github/workflows/build.yml`):
+
+```bash
+# Manual build (local testing only)
 cd infrastructure
 
-# Validate Terraform
-terraform validate
-terraform plan
-
-# Validate Kubernetes manifests
-kubectl apply --dry-run=client -f kubernetes/
-kubectl apply --dry-run=server -f kubernetes/
-```
-
-### Apply Infrastructure Changes
-```bash
-# Plan changes (read-only, safe to inspect)
-terraform plan -out=tfplan
-
-# Apply approved changes (requires explicit confirmation)
-terraform apply tfplan
-```
-
-### Build and Push Docker Images
-```bash
 # Build server image
-docker build -f docker/Dockerfile.server -t language-server:latest .
+docker build \
+  -f docker/Dockerfile.server \
+  -t languageregistry.azurecr.io/server:latest .
 
 # Build client image
-docker build -f docker/Dockerfile.client -t language-client:latest .
+docker build \
+  -f docker/Dockerfile.client \
+  -t languageregistry.azurecr.io/client:latest .
 
-# Push to registry
-docker push language-server:latest
-docker push language-client:latest
+# Push to Azure Container Registry
+az acr login --name languageregistry
+docker push languageregistry.azurecr.io/server:latest
+docker push languageregistry.azurecr.io/client:latest
 ```
 
-## Cloud Architecture
+## Cloud Architecture (Azure)
 
-### Services
-- **Kubernetes Cluster**: Primary runtime environment
-- **Container Registry**: Stores Docker images (server, client)
-- **Load Balancer**: Routes traffic to gRPC server
-- **Networking**: VPC, subnets, security groups
+### Core Services
 
-### Key Resources (Terraform)
-- EKS/GKE/AKS cluster
-- RDS for persistent data (optional)
-- S3/GCS/Azure Blob for object storage
-- CloudWatch/Stackdriver/Azure Monitor for logging
+| Service | Purpose |
+|---------|---------|
+| **Azure Container Apps** | Serverless container platform for gRPC server |
+| **Azure Container Registry (ACR)** | Secure Docker image storage and management |
+| **Azure Virtual Network (VNet)** | Network isolation and connectivity |
+| **Log Analytics Workspace** | Centralized logging and monitoring |
+| **Azure Storage Account** | Terraform state file storage with locking |
+
+### Azure Resources Created by Terraform
+
+```
+Resource Group: language-rg
+├── Container Registry: languageregistry
+├── Virtual Network: language-vnet
+│   └── Subnet: language-subnet-ca (10.0.1.0/24)
+├── Network Security Group: language-nsg
+│   └── Rules: Allow gRPC traffic (port 50051)
+├── Log Analytics Workspace: language-logs
+├── Container Apps Environment: language-{env}-cae
+│   └── Container App: language-server
+│       ├── Image: languageregistry.azurecr.io/server:latest
+│       ├── CPU: 0.5-1.0 cores
+│       ├── Memory: 1.0-2.0 GB
+│       ├── Replicas: 2-10 (auto-scaling)
+│       └── Ingress: TCP port 50051 (gRPC)
+```
+
+### Why Azure Container Apps for gRPC?
+
+✅ **Perfect for gRPC workloads:**
+- Native HTTP/2 support (required by gRPC)
+- TCP ingress with static ports
+- Automatic TLS termination
+- Built-in request tracing
+
+✅ **Cost effective:**
+- Pay only for CPU/memory used
+- No cluster management overhead
+- Scales to zero (configurable)
+
+✅ **High availability:**
+- Multi-zone deployment
+- Automatic failover
+- Health checks and probes
+
+✅ **Developer friendly:**
+- Simple scaling configuration
+- No Kubernetes learning curve
+- Built-in monitoring and logging
 
 ## Secrets Management
 
@@ -100,16 +194,129 @@ stringData:
 
 ## Deployment Workflow
 
-1. **Local validation** - `terraform plan`, `kubectl dry-run`
-2. **Code review** - PR review of infrastructure changes
-3. **CI/CD execution** - GitHub Actions applies changes
-4. **Verification** - Health checks and monitoring alerts
+```
+Developer Push
+    ↓
+Feature Branch Created
+    ↓
+GitHub Actions: Terraform Plan
+    ├─ Format check
+    ├─ Validate syntax
+    ├─ Generate plan
+    └─ Comment plan on PR
+    ↓
+Code Review
+    ├─ Inspect resource changes
+    ├─ Verify no unintended deletions
+    └─ Approve PR
+    ↓
+Merge to Main
+    ↓
+GitHub Actions: Terraform Apply
+    ├─ Plan again (safety check)
+    ├─ Wait for manual approval
+    ├─ Apply approved changes
+    └─ Export outputs (FQDN, registry URL)
+    ↓
+Deployment Complete
+    ├─ Azure resources updated
+    ├─ Container App versions updated
+    └─ Logs available in Log Analytics
+```
 
-See `.github/workflows/` for deployment automation.
+### Key Features
 
-## Related Guides
+- **PR-based review**: See all changes before applying
+- **Deployment locks**: Prevent concurrent modifications
+- **State versioning**: Rollback to previous states if needed
+- **Approval gates**: Manual review before production apply
+- **Automatic logging**: All changes audited in Azure Storage
 
-- See `.claude/WORKTREE_GUIDE.md` for infrastructure worktree specifications
-- See `pipelines/README.md` for CI/CD pipeline documentation
-- See `server/README.md` for containerization requirements
-- See `client/README.md` for client deployment requirements
+See:
+- `.github/workflows/deploy.yml` for workflow definitions
+- `.github/DEPLOYMENT_GUIDE.md` for GitHub Actions details
+- `AZURE_DEPLOYMENT_GUIDE.md` for local setup instructions
+- `STATE_MANAGEMENT.md` for state and locking details
+
+## Getting Started
+
+### First Time Setup
+
+1. **Prerequisites**
+   - Azure subscription with appropriate permissions
+   - Azure CLI installed and authenticated
+   - Terraform 1.6+ installed
+   - Access to GitHub repository
+
+2. **Create State Storage**
+   - Follow instructions in `AZURE_DEPLOYMENT_GUIDE.md`
+   - Run setup script to create storage account
+   - Add secrets to GitHub
+
+3. **Configure Local Development**
+   - Copy `terraform/terraform.tfvars.example` → `terraform/terraform.tfvars`
+   - Fill in your Azure subscription ID and configuration
+   - Run `terraform init` and `terraform plan`
+
+4. **Test Deployment**
+   - Create feature branch
+   - Make small Terraform change
+   - Push and create PR
+   - Review plan output
+   - Merge and watch GitHub Actions apply
+
+### Common Commands
+
+```bash
+# View current infrastructure
+cd infrastructure/terraform
+terraform state list
+terraform state show azurerm_container_app.server
+
+# Check outputs
+terraform output
+terraform output server_container_app_fqdn
+
+# View server logs
+az containerapp logs show \
+  --resource-group language-rg \
+  --name language-server \
+  --follow
+```
+
+## Documentation
+
+**Start here:**
+- **[../TERRAFORM_QUICKSTART.md](../TERRAFORM_QUICKSTART.md)** - 15-minute setup guide to get started
+
+**Environment Setup:**
+- **[AZURE_DEPLOYMENT_GUIDE.md](./AZURE_DEPLOYMENT_GUIDE.md)** - Azure setup, OIDC authentication, troubleshooting
+- **[MULTI_ENVIRONMENT_GUIDE.md](./MULTI_ENVIRONMENT_GUIDE.md)** - Managing dev/staging/prod with separate state files and configs
+
+**Advanced Topics:**
+- **[BACKEND_CONFIGURATION.md](./BACKEND_CONFIGURATION.md)** - Backend config, why `key` differentiates state files, init flags
+- **[STATE_MANAGEMENT.md](./STATE_MANAGEMENT.md)** - State files, locking, versioning, rollback, disaster recovery
+- **[../.github/DEPLOYMENT_GUIDE.md](../.github/DEPLOYMENT_GUIDE.md)** - GitHub Actions workflow details and manual triggers
+- **[../.github/MANUAL_WORKFLOW_GUIDE.md](../.github/MANUAL_WORKFLOW_GUIDE.md)** - How to trigger workflows manually
+- **[../.github/PERMISSIONS_GUIDE.md](../.github/PERMISSIONS_GUIDE.md)** - OIDC authentication and security model
+
+**Reference:**
+- **[./.claude/WORKTREE_GUIDE.md](../.claude/WORKTREE_GUIDE.md)** - Infrastructure worktree specifications
+- **[../.github/README.md](../.github/README.md)** - GitHub Actions workflows overview
+
+## Support and Troubleshooting
+
+If you encounter issues:
+
+1. **Terraform plan fails**: See `AZURE_DEPLOYMENT_GUIDE.md` → Troubleshooting
+2. **GitHub Actions deployment error**: See `.github/DEPLOYMENT_GUIDE.md` → Troubleshooting
+3. **State management issues**: See `STATE_MANAGEMENT.md` → Troubleshooting
+4. **Azure authentication problems**: See `AZURE_DEPLOYMENT_GUIDE.md` → Prerequisites
+
+## Next Steps
+
+1. **Quick Start**: Read [../TERRAFORM_QUICKSTART.md](../TERRAFORM_QUICKSTART.md)
+2. **Set Up Azure**: Follow [AZURE_DEPLOYMENT_GUIDE.md](./AZURE_DEPLOYMENT_GUIDE.md)
+3. **Configure Environments**: Review [MULTI_ENVIRONMENT_GUIDE.md](./MULTI_ENVIRONMENT_GUIDE.md)
+4. **Test Locally**: `terraform plan -var-file="environments/dev.tfvars"`
+5. **Deploy via GitHub**: Use Actions tab to trigger plan/apply for your environment

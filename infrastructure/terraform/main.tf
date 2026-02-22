@@ -1,125 +1,181 @@
-# Data source for current AWS account
-data "aws_caller_identity" "current" {}
+# Resource Group
+resource "azurerm_resource_group" "main" {
+  name       = var.resource_group_name
+  location   = var.azure_region
 
-data "aws_availability_zones" "available" {
-  state = "available"
+  tags = merge(
+    var.tags,
+    {
+      Environment = var.environment
+      ManagedBy   = "Terraform"
+      Project     = var.app_name
+    }
+  )
 }
 
-# VPC
-resource "aws_vpc" "main" {
-  cidr_block           = "10.0.0.0/16"
-  enable_dns_hostnames = true
-  enable_dns_support   = true
+# Azure Container Registry
+resource "azurerm_container_registry" "main" {
+  name                = var.container_registry_name
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  sku                 = "Standard"
+  admin_enabled       = true
 
-  tags = {
-    Name = "${var.app_name}-vpc"
+  tags = merge(
+    var.tags,
+    {
+      Environment = var.environment
+      ManagedBy   = "Terraform"
+    }
+  )
+}
+
+# Virtual Network for Container Apps
+resource "azurerm_virtual_network" "main" {
+  name                = "${var.app_name}-vnet"
+  address_space       = ["10.0.0.0/16"]
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  tags = merge(
+    var.tags,
+    {
+      Environment = var.environment
+    }
+  )
+}
+
+# Subnet for Container Apps Environment
+resource "azurerm_subnet" "container_apps" {
+  name                 = "${var.app_name}-subnet-ca"
+  resource_group_name  = azurerm_resource_group.main.name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.0.1.0/24"]
+}
+
+# Log Analytics Workspace (required for Container Apps)
+resource "azurerm_log_analytics_workspace" "main" {
+  name                = "${var.app_name}-logs"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  sku                 = "PerGB2018"
+  retention_in_days   = 30
+
+  tags = merge(
+    var.tags,
+    {
+      Environment = var.environment
+    }
+  )
+}
+
+# Container Apps Environment
+resource "azurerm_container_app_environment" "main" {
+  name                           = "${var.app_name}-${var.environment}-cae"
+  location                       = azurerm_resource_group.main.location
+  resource_group_name            = azurerm_resource_group.main.name
+  log_analytics_workspace_id     = azurerm_log_analytics_workspace.main.id
+  infrastructure_subnet_id       = azurerm_subnet.container_apps.id
+  internal_load_balancer_enabled = false
+
+  tags = merge(
+    var.tags,
+    {
+      Environment = var.environment
+    }
+  )
+}
+
+# Container App for gRPC Server
+resource "azurerm_container_app" "server" {
+  name                         = "${var.app_name}-server"
+  container_app_environment_id = azurerm_container_app_environment.main.id
+  resource_group_name          = azurerm_resource_group.main.name
+  revision_mode                = "Single"
+
+  template {
+    container {
+      name   = "server"
+      image  = var.server_image
+      cpu    = var.server_cpu
+      memory = var.server_memory
+
+      env {
+        name  = "ENVIRONMENT"
+        value = var.environment
+      }
+
+      env {
+        name  = "PORT"
+        value = var.server_port
+      }
+    }
+
+    min_replicas = var.server_replicas
+    max_replicas = 10
   }
-}
-
-# Public Subnets
-resource "aws_subnet" "public" {
-  count                   = 2
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.${count.index + 1}.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[count.index]
-  map_public_ip_on_launch = true
-
-  tags = {
-    Name = "${var.app_name}-public-subnet-${count.index + 1}"
-  }
-}
-
-# Internet Gateway
-resource "aws_internet_gateway" "main" {
-  vpc_id = aws_vpc.main.id
-
-  tags = {
-    Name = "${var.app_name}-igw"
-  }
-}
-
-# Route Table for Public Subnets
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block      = "0.0.0.0/0"
-    gateway_id      = aws_internet_gateway.main.id
-  }
-
-  tags = {
-    Name = "${var.app_name}-public-rt"
-  }
-}
-
-resource "aws_route_table_association" "public" {
-  count          = 2
-  subnet_id      = aws_subnet.public[count.index].id
-  route_table_id = aws_route_table.public.id
-}
-
-# Security Group for EKS
-resource "aws_security_group" "cluster" {
-  name        = "${var.app_name}-cluster-sg"
-  description = "Security group for EKS cluster"
-  vpc_id      = aws_vpc.main.id
 
   ingress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    self        = true
+    allow_insecure_connections = true
+    external_enabled           = true
+    target_port                = var.server_port
+    transport                  = "tcp"
+
+    traffic_weight {
+      latest_revision = true
+      percentage      = 100
+    }
   }
 
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+  tags = merge(
+    var.tags,
+    {
+      Environment = var.environment
+      Service     = "grpc-server"
+    }
+  )
+}
+
+# Network Security Group
+resource "azurerm_network_security_group" "container_apps" {
+  name                = "${var.app_name}-nsg"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  security_rule {
+    name                       = "AllowGRPCIngress"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = var.server_port
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
 
-  tags = {
-    Name = "${var.app_name}-cluster-sg"
+  security_rule {
+    name                       = "AllowOutbound"
+    priority                   = 100
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
   }
+
+  tags = merge(
+    var.tags,
+    {
+      Environment = var.environment
+    }
+  )
 }
 
-# EKS Cluster (uncomment when ready to provision)
-# Note: This requires IAM roles to be created first
-# See modules/ for a complete, reusable EKS module
-
-# resource "aws_eks_cluster" "main" {
-#   name     = "${var.app_name}-${var.environment}"
-#   role_arn = aws_iam_role.cluster.arn
-#   version  = var.cluster_version
-
-#   vpc_config {
-#     subnet_ids              = aws_subnet.public[*].id
-#     security_groups         = [aws_security_group.cluster.id]
-#     endpoint_private_access = true
-#     endpoint_public_access  = true
-#   }
-
-#   depends_on = [
-#     aws_iam_role_policy_attachment.cluster_policy
-#   ]
-
-#   tags = {
-#     Environment = var.environment
-#   }
-# }
-
-# Output cluster information
-output "vpc_id" {
-  description = "VPC ID"
-  value       = aws_vpc.main.id
-}
-
-output "public_subnets" {
-  description = "Public subnet IDs"
-  value       = aws_subnet.public[*].id
-}
-
-output "security_group_id" {
-  description = "Cluster security group ID"
-  value       = aws_security_group.cluster.id
+# Associate NSG with subnet
+resource "azurerm_subnet_network_security_group_association" "container_apps" {
+  subnet_id                 = azurerm_subnet.container_apps.id
+  network_security_group_id = azurerm_network_security_group.container_apps.id
 }

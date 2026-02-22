@@ -1,0 +1,8 @@
+# Create environment-specific terraform.tfvars files in this directory
+#
+# Example files:
+# - dev.tfvars      (development environment)
+# - staging.tfvars  (staging/pre-production)
+# - prod.tfvars     (production)
+#
+# See ../MULTI_ENVIRONMENT_GUIDE.md for detailed examples and instructions
