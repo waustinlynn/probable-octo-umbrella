@@ -1,4 +1,3 @@
-import * as FileSystem from "expo-file-system";
 import { Audio } from "expo-av";
 import { Platform } from "react-native";
 
@@ -69,7 +68,7 @@ export class AudioService {
       const recordingOptions: Audio.RecordingOptions = {
         ios: {
           extension: ".wav",
-          audioQuality: Audio.RecordingQuality.MAX,
+          audioQuality: 'max' as any,
           sampleRate: this.config.sampleRate,
           numberOfChannels: this.config.channels,
           bitRate: 128000,
@@ -142,7 +141,6 @@ export class AudioService {
       await this.recording.stopAndUnloadAsync();
 
       const uri = this.recording.getURI();
-      const fileInfo = await FileSystem.getInfoAsync(uri || "");
 
       if (!uri) {
         throw new Error("Failed to get recording URI");
