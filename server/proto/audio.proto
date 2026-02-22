@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package audio;
+
+service AudioService {
+  // Bidirectional streaming: client sends audio chunks, server acknowledges
+  rpc StreamAudio(stream AudioChunk) returns (stream AudioAck);
+}
+
+message AudioChunk {
+  string session_id = 1;  // Session identifier
+  bytes audio_data = 2;   // PCM audio data
+  int32 sample_rate = 3;  // Sample rate (e.g., 16000 Hz)
+}
+
+message AudioAck {
+  string session_id = 1;
+  bool success = 2;
+  string message = 3;
+}
