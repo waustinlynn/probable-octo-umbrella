@@ -1,0 +1,52 @@
+coverage:
+  precision: 2
+  round: down
+  range: "70...100"
+
+ignore:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/node_modules"
+  - "**/dist"
+  - "**/coverage"
+
+flags:
+  client:
+    carryforward: true
+    paths:
+      - client/
+  server:
+    carryforward: true
+    paths:
+      - server/
+
+comment:
+  layout: "reach,diff,flags,tree"
+  behavior: default
+  require_changes: false
+  require_base: no
+  require_head: yes
+  delete_orphaned_comments: false
+
+# Codecov status checks
+status:
+  project:
+    default:
+      target: 70%
+      threshold: null
+      base: auto
+
+  patch:
+    default:
+      target: 70%
+      threshold: null
+
+  changes:
+    default:
+      branches: null
+      if_not_found: success
+      if_ci_failed: error
+      only_pulls: false
+
+suggest:
+  layout: "reach,diff,flags,tree"

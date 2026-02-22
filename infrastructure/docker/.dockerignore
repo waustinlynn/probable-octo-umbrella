@@ -1,0 +1,67 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Version control
+.hg
+.hgignore
+
+# Package managers
+npm-debug.log
+yarn-error.log
+.npm
+.yarn
+node_modules/
+
+# Testing
+coverage/
+.jest_cache/
+**/*.test.js
+**/*.spec.js
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Documentation
+README.md
+CHANGELOG.md
+docs/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.circleci/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# System
+Thumbs.db
+.DS_Store
+
+# Kubernetes/Infrastructure
+infrastructure/
+.github/workflows/
+terraform/
+kubernetes/
+
+# Development
+.claude/
+SETUP.md
+TESTING.md
+QUICKSTART*.md
+AUDIO_STREAMING_SETUP.md

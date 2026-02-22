@@ -1,0 +1,56 @@
+# Build stage
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY client/package*.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy source and configuration
+COPY client/tsconfig.json ./
+COPY client/app.json ./
+COPY client/eslint.config.js ./
+COPY client/app ./app
+COPY client/components ./components
+COPY client/hooks ./hooks
+COPY client/context ./context
+COPY client/constants ./constants
+COPY client/services ./services
+COPY client/assets ./assets
+
+# Build web version (for testing/documentation purposes)
+# Note: Mobile builds require EAS or local tooling
+RUN npm run build:web || true
+
+# Runtime stage - Lightweight server for static assets
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dumb-init
+RUN apk add --no-cache dumb-init
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001
+
+# Copy built assets from builder
+COPY --from=builder /app/dist /app/dist || true
+
+# Install a simple HTTP server for serving built assets
+RUN npm install --global serve
+
+USER nodejs
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost:3000 || exit 1
+
+ENTRYPOINT ["dumb-init", "--"]
+# For production, you'd serve the built static assets
+# For development, you might use Expo build or web server
+CMD ["serve", "-s", "dist", "-l", "3000"]

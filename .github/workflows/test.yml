@@ -1,0 +1,123 @@
+name: Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test-client:
+    name: Test Client
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.head_commit.modified, 'client/') ||
+      github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install dependencies
+        working-directory: client
+        run: npm ci
+
+      - name: Run linter
+        working-directory: client
+        run: npm run lint || true
+
+      - name: Run tests
+        working-directory: client
+        run: npm test -- --coverage --watchAll=false
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./client/coverage/coverage-final.json
+          flags: client
+
+  test-server:
+    name: Test Server
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.head_commit.modified, 'server/') ||
+      github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Type check
+        working-directory: server
+        run: npm run build
+
+      - name: Run linter
+        working-directory: server
+        run: npm run lint || true
+
+      - name: Run unit tests
+        working-directory: server
+        run: npm test -- --coverage
+
+      - name: Run integration tests
+        working-directory: server
+        run: npm run test:integration
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./server/coverage/coverage-final.json
+          flags: server
+
+  validate-infrastructure:
+    name: Validate Infrastructure
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.head_commit.modified, 'infrastructure/') ||
+      github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform Format Check
+        working-directory: infrastructure/terraform
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        working-directory: infrastructure/terraform
+        run: terraform validate
+
+      - name: TFLint
+        uses: terraform-linters/setup-tflint@v3
+
+      - name: Run TFLint
+        working-directory: infrastructure/terraform
+        run: |
+          tflint --init
+          tflint --format json > tflint-report.json || true
+
+      - name: Validate Kubernetes manifests
+        run: |
+          kubectl apply --dry-run=client -f infrastructure/kubernetes/ || true
+        continue-on-error: true

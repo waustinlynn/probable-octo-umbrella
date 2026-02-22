@@ -2,12 +2,19 @@
   "permissions": {
     "allow": [
       "Bash(npm install)",
-      "Bash(npm run build:*)",
-      "Bash(npm install:*)",
-      "Bash(npm test)",
-      "Bash(ls:*)",
-      "Bash(cat:*)",
-      "Bash(npm run lint:*)"
+      "Bash(npm run build*)",
+      "Bash(npm test*)",
+      "Bash(npm run dev*)",
+      "Bash(npm run lint*)",
+      "Bash(npx expo*)",
+      "Bash(terraform plan)",
+      "Bash(terraform validate)",
+      "Bash(docker build*)",
+      "Bash(kubectl get*)",
+      "Bash(git worktree*)",
+      "Bash(git status)",
+      "Bash(git log*)",
+      "Bash(gh *)"
     ]
   }
 }
