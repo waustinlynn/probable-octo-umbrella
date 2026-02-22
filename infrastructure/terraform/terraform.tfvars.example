@@ -1,0 +1,37 @@
+# Azure Configuration Example
+# Copy this file to terraform.tfvars and fill in your values
+# DO NOT commit terraform.tfvars - it may contain secrets
+
+# Your Azure subscription ID (find with: az account show --query id -o tsv)
+azure_subscription_id = "00000000-0000-0000-0000-000000000000"
+
+# Azure region for deployment
+azure_region = "eastus"
+
+# Environment: dev, staging, or prod
+environment = "dev"
+
+# Resource Group name
+resource_group_name = "language-rg"
+
+# Container Registry name (must be globally unique, alphanumeric only, 5-50 chars)
+container_registry_name = "languageregistry"
+
+# Server Docker image (in format: registry.azurecr.io/server:tag)
+server_image = "languageregistry.azurecr.io/server:latest"
+
+# CPU and memory for gRPC server container
+server_cpu    = "0.5"
+server_memory = "1.0"
+
+# Number of server replicas
+server_replicas = 2
+
+# gRPC server port
+server_port = 50051
+
+# Additional tags
+tags = {
+  Team  = "backend"
+  Owner = "devops"
+}

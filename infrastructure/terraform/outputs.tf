@@ -1,36 +1,82 @@
+# Azure Container Registry Outputs
+output "container_registry_login_server" {
+  description = "Container Registry login server"
+  value       = azurerm_container_registry.main.login_server
+}
+
+output "container_registry_id" {
+  description = "Container Registry ID"
+  value       = azurerm_container_registry.main.id
+}
+
+output "container_registry_admin_username" {
+  description = "Container Registry admin username"
+  value       = azurerm_container_registry.main.admin_username
+  sensitive   = true
+}
+
+output "container_registry_admin_password" {
+  description = "Container Registry admin password"
+  value       = azurerm_container_registry.main.admin_password
+  sensitive   = true
+}
+
+# Container Apps Environment Outputs
+output "container_app_environment_id" {
+  description = "Container Apps Environment ID"
+  value       = azurerm_container_app_environment.main.id
+}
+
+output "container_app_environment_name" {
+  description = "Container Apps Environment name"
+  value       = azurerm_container_app_environment.main.name
+}
+
+# gRPC Server Container App Outputs
+output "server_container_app_fqdn" {
+  description = "gRPC server fully qualified domain name"
+  value       = azurerm_container_app.server.ingress[0].fqdn
+}
+
+output "server_container_app_id" {
+  description = "gRPC server Container App ID"
+  value       = azurerm_container_app.server.id
+}
+
+output "server_container_app_name" {
+  description = "gRPC server Container App name"
+  value       = azurerm_container_app.server.name
+}
+
+# Resource Group Outputs
+output "resource_group_name" {
+  description = "Resource Group name"
+  value       = azurerm_resource_group.main.name
+}
+
+output "resource_group_id" {
+  description = "Resource Group ID"
+  value       = azurerm_resource_group.main.id
+}
+
+# Virtual Network Outputs
+output "virtual_network_id" {
+  description = "Virtual Network ID"
+  value       = azurerm_virtual_network.main.id
+}
+
+output "virtual_network_name" {
+  description = "Virtual Network name"
+  value       = azurerm_virtual_network.main.name
+}
+
+# Environment and region info
 output "environment" {
   description = "Environment name"
   value       = var.environment
 }
 
-output "aws_region" {
-  description = "AWS region"
-  value       = var.aws_region
+output "azure_region" {
+  description = "Azure region"
+  value       = var.azure_region
 }
-
-output "aws_account_id" {
-  description = "AWS account ID"
-  value       = data.aws_caller_identity.current.account_id
-}
-
-# When EKS cluster is uncommented, add:
-# output "cluster_endpoint" {
-#   description = "Kubernetes API endpoint"
-#   value       = aws_eks_cluster.main.endpoint
-# }
-
-# output "cluster_ca_certificate" {
-#   description = "Base64 encoded CA certificate"
-#   value       = aws_eks_cluster.main.certificate_authority[0].data
-#   sensitive   = true
-# }
-
-# output "cluster_name" {
-#   description = "EKS cluster name"
-#   value       = aws_eks_cluster.main.name
-# }
-
-# output "cluster_security_group_id" {
-#   description = "Security group ID of the cluster"
-#   value       = aws_eks_cluster.main.vpc_config[0].security_group_ids[0]
-# }
