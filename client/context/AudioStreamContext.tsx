@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useCallback, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { WebSocketManager } from '../services/WebSocketManager';
 import { audioStreamService, AudioStreamService } from '../services/AudioStreamService';
 

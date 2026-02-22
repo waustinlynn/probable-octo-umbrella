@@ -1,5 +1,4 @@
 import { Audio } from 'expo-av';
-import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import { WebSocketManager } from './WebSocketManager';
 
@@ -71,7 +70,7 @@ export class AudioStreamService {
       const recordingOptions: Audio.RecordingOptions = {
         ios: {
           extension: '.wav',
-          audioQuality: Audio.RecordingQuality.MAX,
+          audioQuality: 'max' as any,
           sampleRate: this.sampleRate,
           numberOfChannels: this.channels,
           bitRate: 128000,
@@ -81,8 +80,8 @@ export class AudioStreamService {
         },
         android: {
           extension: '.wav',
-          outputFormat: Audio.RECORDING_OPTION_ANDROID_OUTPUT_FORMAT_MPEG_4,
-          audioEncoder: Audio.RECORDING_OPTION_ANDROID_AUDIO_ENCODER_AAC,
+          outputFormat: 'MPEG_4' as any,
+          audioEncoder: 'AAC' as any,
           sampleRate: this.sampleRate,
           numberOfChannels: this.channels,
           bitRate: 128000,
